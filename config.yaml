@@ -1,0 +1,28 @@
+universe:
+  name: "NIFTY50"
+
+providers:
+  prices:
+    - name: "yahoo"
+      type: "free"
+      adapter: "yahoo"
+      priority: 5
+
+cadence:
+  pre_market: "09:00"
+  intraday_interval_minutes: 60
+  post_market: "16:30"
+
+retention:
+  raw_tick_days: 90
+  ohlcv_archive_after_days: 365
+  features_keep_indefinitely: true
+
+weights:
+  eps_yoy: 0.25
+  revenue_yoy: 0.15
+  sma_50_200_crossover: 0.10
+  rsi_14: 0.10
+  momentum_5: 0.10
+  pe_ttm: 0.10
+  news_sentiment_24h: 0.20
