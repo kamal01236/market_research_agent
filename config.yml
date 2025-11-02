@@ -1,0 +1,81 @@
+# Market Research Agent Configuration
+
+# List of symbols to analyze
+# Can be a list or path to a file containing symbols
+symbols: ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "HDFC", "KOTAKBANK", "LT", "ITC", "HINDUNILVR"]
+
+# Database configuration
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  database: market_research
+  min_connections: 5
+  max_connections: 20
+
+# Redis configuration
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: null
+
+# Data provider configuration
+provider:
+  batch_size: 50
+  rate_limit: 2.0  # requests per second
+  retry_attempts: 3
+  retry_delay: 5
+
+# Feature computation configuration
+features:
+  # Moving averages
+  sma:
+    windows: [5, 10, 20, 50, 200]
+  ema:
+    windows: [5, 10, 20, 50, 200]
+    
+  # Momentum indicators
+  rsi:
+    window: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+    
+  # Volatility indicators
+  bollinger:
+    window: 20
+    std_dev: 2
+  atr:
+    window: 14
+    
+  # Volume indicators
+  obv: {}
+  vwap: {}
+  
+  # Price patterns
+  support_resistance:
+    window: 20
+    min_touches: 2
+  
+  # Custom indicators
+  price_momentum:
+    window: 20
+  volume_momentum:
+    window: 20
+
+# Factor weights for scoring (optional)
+# If not provided, equal weights will be used
+factor_weights:
+  trend_following: 0.3
+  mean_reversion: 0.2
+  momentum: 0.2
+  volatility: 0.15
+  volume: 0.15
+
+# API configuration
+api:
+  host: 0.0.0.0
+  port: 8000

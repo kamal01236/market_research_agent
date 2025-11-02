@@ -10,36 +10,321 @@ This document defines a detailed low-level design to implement a factor-scoring 
 
 ### High-level Architecture
 
-Components:
-- Data Ingestion Layer
-	- Price/time-series (OHLCV) from exchanges or data providers
-	- Fundamentals (annual & quarterly financials)
-	- Corporate actions (splits, dividends)
-	- Market data: options chains, F&O, implied vol, orderbook snapshots (if available)
-	- Macro indicators (rates, CPI, GDP) and commodity prices
-	- News & social sentiment (news APIs, X/Twitter, Reddit-like sources)
+#### System Components & Interactions
 
-- ETL / Feature Engineering
-	- Cleaning, alignment, adjustment (corporate actions)
-	- Factor computation (per the categories below)
+1. Data Ingestion Layer
+- Components:
+  - Data Provider Adapters
+    - Interface: `DataProviderAdapter[T]` with methods:
+      ```python
+      async def fetch_data(self, symbols: List[str], start_date: datetime, end_date: datetime) -> Dict[str, pd.DataFrame]
+      async def validate_data(self, df: pd.DataFrame) -> Tuple[bool, List[str]]  # returns (is_valid, errors)
+      ```
+    - Implementations:
+      - `OHLCVAdapter` (Yahoo, NSE direct)
+      - `FundamentalsAdapter` (Screener, Exchange filings)
+      - `CorporateActionsAdapter`
+      - `OptionsChainAdapter`
+      - `MacroAdapter` (RBI data)
+      - `SentimentAdapter` (News API)
+  
+  - Data Quality Layer
+    - Validation rules engine
+    - Gap detection & interpolation
+    - Outlier detection
+    - Data freshness monitoring
 
-- Feature Store (time-series optimized)
-	- Raw tables and derived features for rapid retrieval
+  - Ingestion Pipeline
+    ```python
+    class IngestionPipeline:
+        async def ingest(self, universe: str, data_type: str) -> IngestResult:
+            providers = self.get_providers(data_type)  # ordered by priority
+            for provider in providers:
+                try:
+                    data = await provider.fetch_data(...)
+                    if self.validate(data):
+                        await self.store(data)
+                        return Success
+                except ProviderError:
+                    continue  # try next provider
+            return Failure
+    ```
 
-- Scoring Engine
-	- Normalization + weighting + aggregation -> factor score
-	- Config-driven weights (JSON) and dynamic re-weighting via learning
+2. ETL / Feature Engineering
+- Components:
+  - Data Preprocessor
+    - Corporate action adjustment
+    - Time series alignment
+    - Missing data handling
+  
+  - Feature Computer
+    ```python
+    class FeatureComputer:
+        def compute_features(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+            features = {}
+            for category in self.enabled_categories:
+                calculator = self.get_calculator(category)
+                features[category] = calculator.compute(data)
+            return features
+    ```
+  
+  - Feature Categories (separate modules):
+    - TechnicalFeatures (price/volume based)
+    - FundamentalFeatures (financial ratios)
+    - SentimentFeatures (news/social)
+    - MacroFeatures (economic indicators)
+    - EventFeatures (corporate events)
+    - OptionsFeatures (derivatives data)
 
-- Learning & Backtest Module
-	- Offline/backtest to learn weights, validate signals; produce model artifacts
+3. Feature Store
+- Implementation:
+  ```sql
+  CREATE TABLE features (
+      symbol TEXT,
+      ts TIMESTAMPTZ,      -- hypertable partition key
+      category TEXT,
+      feature_name TEXT,
+      value DOUBLE PRECISION,
+      metadata JSONB,      -- quality metrics, source info
+      PRIMARY KEY (symbol, ts, feature_name)
+  );
+  CREATE INDEX ON features (feature_name, ts DESC);
+  ```
+- Query Interface:
+  ```python
+  async def get_features(
+      symbols: List[str],
+      features: List[str],
+      start_ts: datetime,
+      end_ts: datetime,
+      interval: str = '1d'
+  ) -> Dict[str, pd.DataFrame]
+  ```
 
-- API / Dashboard
-	- Expose scores, factor explanations, watchlists, historical analyses
+4. Scoring Engine
+- Components:
+  - Normalizer
+    ```python
+    class Normalizer:
+        def normalize(self, features: Dict[str, pd.DataFrame], method: str) -> Dict[str, pd.DataFrame]:
+            if method == 'zscore':
+                return self._zscore_normalize(features)
+            elif method == 'rank':
+                return self._rank_normalize(features)
+    ```
+  
+  - Weight Manager
+    ```python
+    class WeightManager:
+        def get_weights(self) -> Dict[str, float]:
+            if self.use_learned_weights:
+                return self.model.get_latest_weights()
+            return self.config.get_static_weights()
+        
+        def update_weights(self, new_weights: Dict[str, float]):
+            self.validate_weights(new_weights)  # sum to 1, constraints
+            self.store_weights(new_weights)
+    ```
+  
+  - Score Computer
+    ```python
+    class ScoreComputer:
+        def compute_scores(
+            self,
+            features: Dict[str, pd.DataFrame],
+            weights: Dict[str, float]
+        ) -> Tuple[pd.Series, Dict]:
+            normalized = self.normalizer.normalize(features)
+            scores = self.aggregate(normalized, weights)
+            explanations = self.explain_scores(normalized, weights)
+            return scores, explanations
+    ```
 
-- Storage & Ops
-	- DB (Postgres/Timescale), object store (S3 or local), cache (Redis), message bus (Kafka/RabbitMQ optional), scheduler (Airflow/Cron/Celery)
+5. Learning & Backtest Module
+- Components:
+  - Dataset Builder
+    ```python
+    class DatasetBuilder:
+        def build_training_data(
+            self,
+            start_date: datetime,
+            end_date: datetime,
+            horizon_days: int
+        ) -> Tuple[pd.DataFrame, pd.Series]:  # (X_features, y_returns)
+    ```
+  
+  - Model Manager
+    ```python
+    class ModelManager:
+        def train_model(self, X: pd.DataFrame, y: pd.Series) -> Dict:
+            model = self.create_model()  # XGBoost/LightGBM
+            model.fit(X, y)
+            weights = self.extract_weights(model)
+            return {
+                'weights': weights,
+                'metrics': self.compute_metrics(model, X, y),
+                'artifacts': self.serialize_model(model)
+            }
+    ```
+  
+  - Backtest Engine
+    ```python
+    class BacktestEngine:
+        def run_backtest(
+            self,
+            strategy: TradingStrategy,
+            start_date: datetime,
+            end_date: datetime
+        ) -> BacktestResults:
+            universe = self.get_universe(start_date)
+            for date in self.date_range(start_date, end_date):
+                scores = self.compute_historical_scores(date)
+                signals = strategy.generate_signals(scores)
+                self.simulate_trades(signals)
+            return self.compute_performance_metrics()
+    ```
 
-### Tech Stack (recommended)
+6. API Layer
+- FastAPI Implementation:
+  ```python
+  @app.get("/v1/scores/{symbol}")
+  async def get_symbol_scores(
+      symbol: str,
+      date: datetime = Query(default=None),
+      explain: bool = Query(default=False)
+  ):
+      scores = await score_service.get_scores(symbol, date)
+      if explain:
+          return {
+              "scores": scores,
+              "components": await score_service.get_score_components(symbol, date)
+          }
+      return {"scores": scores}
+  
+  @app.post("/v1/run")
+  async def trigger_run(
+      run_config: RunConfig,
+      background_tasks: BackgroundTasks
+  ):
+      run_id = await scheduler.schedule_run(run_config)
+      return {"run_id": run_id}
+  ```
+
+7. Storage & Ops
+- Database:
+  - TimescaleDB for time-series (OHLCV, features)
+  - PostgreSQL for metadata, models, config
+  - Redis for real-time cache (latest scores, active runs)
+
+- Message Bus (Kafka topics):
+  ```
+  market-data-raw          # raw ingested data
+  feature-updates         # computed features
+  score-updates          # new scores
+  model-updates         # weight updates
+  system-metrics        # monitoring data
+  ```
+
+- Scheduler (Airflow DAGs):
+  ```python
+  with DAG('market_research_daily', schedule='0 9 * * 1-5') as dag:
+      ingest = PythonOperator(
+          task_id='ingest_data',
+          python_callable=run_ingestion
+      )
+      compute = PythonOperator(
+          task_id='compute_features',
+          python_callable=compute_features
+      )
+      score = PythonOperator(
+          task_id='compute_scores',
+          python_callable=compute_scores
+      )
+      
+      ingest >> compute >> score
+  ```
+
+#### Inter-service Communication
+
+1. Real-time Flow (During Market)
+```mermaid
+sequenceDiagram
+    participant DP as Data Provider
+    participant IL as Ingestion Layer
+    participant FE as Feature Engine
+    participant SE as Scoring Engine
+    participant API as API Layer
+    
+    loop Every N minutes
+        DP->>IL: Stream market data
+        IL->>FE: New data available
+        FE->>SE: Updated features
+        SE->>API: New scores
+    end
+```
+
+2. Model Update Flow
+```mermaid
+sequenceDiagram
+    participant BT as Backtest Engine
+    participant MM as Model Manager
+    participant SE as Scoring Engine
+    participant DB as Database
+    
+    BT->>MM: Training data
+    MM->>MM: Train model
+    MM->>SE: New weights
+    MM->>DB: Store artifacts
+    SE->>SE: Update scores
+```
+
+#### Error Handling & Recovery
+
+1. Data Provider Failure
+- Fallback chain with priority
+- Automatic retry with exponential backoff
+- Alert if all providers fail
+
+2. Feature Computation Errors
+- Skip invalid features, continue with subset
+- Log detailed error context
+- Mark affected scores as partial/degraded
+
+3. Model Training Issues
+- Retain previous weights
+- Alert on significant performance drop
+- Maintain backup models
+
+#### Monitoring & Alerting
+
+1. Data Quality Metrics
+- Freshness (delay from real-time)
+- Completeness (% of expected data points)
+- Accuracy (vs alternative sources)
+
+2. System Health
+- Component latency
+- Error rates
+- Resource utilization
+
+3. Business Metrics
+- Score predictive power
+- Portfolio performance
+- Model drift
+
+#### Deployment Architecture
+
+1. Development Environment
+- Local PostgreSQL
+- File-based storage
+- Minimal scheduling
+
+2. Production Environment
+- Containerized services
+- Managed databases
+- Full monitoring stack
+- Load balancers
+- Multiple availability zones### Tech Stack (recommended)
 - Language: Python 3.11+
 - Data: PostgreSQL (TimescaleDB if heavy time-series), S3 (or local FS) for raw files
 - Orchestration: Airflow or Prefect for complex schedules; Cron/Celery for simpler setups

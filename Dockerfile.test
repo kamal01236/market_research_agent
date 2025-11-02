@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install test dependencies
+COPY pyproject.toml .
+RUN pip install --no-cache-dir ".[test,dev]"
+
+# Copy source code and tests
+COPY market_research_agent/ ./market_research_agent/
+COPY tests/ ./tests/
+COPY config.yml .
+
+# Run tests
+CMD ["pytest"]
