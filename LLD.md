@@ -278,6 +278,82 @@ Payload formats are JSON; components use compact JSON for factor breakdown.
 - Intraday orderbook-level features are optional and require access to Level-2 feeds.
 - Legal/licensing responsibilities for scraping or storing exchange data are the user's responsibility.
 
+### Configurability: Universe, Data Providers, Cadence & Retention
+
+This system is designed to be highly configurable. Below are specific recommendations and implementation notes so the agent can be adapted to different users, budgets, and operating modes.
+
+1) Target Universe (configurable)
+- Description: Support multiple predefined universes and custom watchlists to control the symbol set the agent processes.
+- Options:
+	- preset: "NSE200", "NIFTY500", "NIFTY50", etc.
+	- custom: list of tickers or reference to a watchlist table (e.g., `watchlists.custom_1`).
+- Implementation notes:
+	- Store universe definitions in a `config/universes.yaml` or DB table `universes(name, filter_sql_or_list, updated_ts)`.
+	- Allow runtime overrides (API payload / CLI flag) for ad-hoc runs.
+	- Universe config should include rebalancing cadence (e.g., monthly re-evaluate membership) and survivorship handling.
+
+2) Data Provider(s) (configurable with priority/fallback)
+- Description: Allow multiple providers for price and fundamentals with prioritized fallbacks (paid -> free) and provider-specific adapters.
+- Config keys:
+	- prices: [{name: "exchange", type: "paid", adapter: "nse_feed", priority: 10, credentials_id: "secrets/nse"}, {name:"yahoo", type:"free", adapter:"yahoo", priority:5}]
+	- fundamentals: [{name:"exchange_filings", type:"paid", priority: 10}, {name:"screener", type:"scrape", priority:3}]
+- Implementation notes:
+	- Build small adapter interface: fetch_prices(symbols, start, end, resolution) and fetch_financials(symbol, periods).
+	- Runtime provider selection: try highest-priority provider; on failure, transparently fall back to next provider and log the event.
+	- Record provider metadata with all ingested rows (source, confidence, latency) for debugging and lineage.
+	- Rate-limit and backoff logic per provider; allow scheduled sync windows for rate-limited APIs.
+
+3) Execution Cadence & Retention (configurable)
+- Execution cadence:
+	- intraday.interval_minutes: default 60 (set to 15, 30, 60 etc.)
+	- pre_market.run_at: ISO time before open (e.g., "09:00")
+	- post_market.run_at: ISO time after close (e.g., "16:30")
+	- live_stream.enabled: boolean, with max_batch_latency_secs for streaming mode
+- Retention policy:
+	- raw_tick_retention_days (default 90)
+	- ohlcv_retention_days (default keep daily indefinitely, but allow archiving older than 3 years to object store)
+	- feature_retention_days (keep features indefinitely for backtesting, with optional compression)
+	- model_artifact_retention (versions to keep)
+- Implementation notes:
+	- Put cadence and retention in a single `config/system.yaml` used by scheduler and archival jobs.
+	- Scheduler (Airflow/Prefect/Cron) should read cadence config and spawn jobs accordingly.
+	- Archival worker moves old raw data to object store and replaces DB rows with pointers to archives to control DB size.
+
+Example config snippet (YAML):
+
+```yaml
+universe:
+	name: "NSE200"
+	type: "preset"
+
+providers:
+	prices:
+		- name: "nse_exchange"
+			type: "paid"
+			adapter: "nse_adapter"
+			priority: 10
+			credentials: "secrets/nse"
+		- name: "yahoo"
+			type: "free"
+			adapter: "yahoo_adapter"
+			priority: 5
+
+cadence:
+	pre_market: "09:00"
+	intraday_interval_minutes: 15
+	post_market: "16:30"
+
+retention:
+	raw_tick_days: 90
+	ohlcv_archive_after_days: 365
+	features_keep_indefinitely: true
+```
+
+How this affects other components:
+- Feature Engine and Scoring Engine should accept a `universe` argument and only compute for symbols in that universe.
+- Backtest and Model Training should support runs constrained to a universe and tag models with the universe they were trained on.
+- Monitoring/alerts should be universe-aware (e.g., per-universe data freshness)
+
 ### Next Steps (recommended)
 1. Confirm target universe (NSE200, NIFTY500, custom watchlist).
 2. Pick data provider(s) for prices and fundamentals (paid vs free).
