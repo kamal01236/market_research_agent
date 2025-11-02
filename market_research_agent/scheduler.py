@@ -8,20 +8,23 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
-from ..config import Settings
-from ..providers import YahooFinanceAdapter
-from ..features.technical import TechnicalFeatures
-from ..store import FeatureStore
-from ..scoring import FactorScorer
+from market_research_agent.config import Settings
+from market_research_agent.providers import YahooFinanceAdapter
+from market_research_agent.features.technical import TechnicalFeatures
+from market_research_agent.store import FeatureStore
+from market_research_agent.scoring import FactorScorer
 
 class JobScheduler:
     """Scheduler for periodic data fetching and feature computation."""
     
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, db_url: str = None):
         self.settings = settings
         self.scheduler = AsyncIOScheduler()
         self.provider = YahooFinanceAdapter()
-        self.feature_store = FeatureStore()
+        # Allow db_url override for testing; fallback to default if not provided
+        if db_url is None:
+            db_url = "postgresql+psycopg2://postgres:postgres@localhost:5432/market_research"
+        self.feature_store = FeatureStore(db_url)
         self.feature_computer = TechnicalFeatures()
         self.scorer = FactorScorer()
         

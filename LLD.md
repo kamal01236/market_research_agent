@@ -534,10 +534,53 @@ Payload formats are JSON; components use compact JSON for factor breakdown.
 - Outliers: clip extreme z-scores and use robust scaling when necessary
 - Surviving/selection bias: ensure backtests include delisted companies or use survivorship-corrected universe
 
-### Tests & Validation
-- Unit tests for feature computations (sample inputs -> expected outputs)
-- Integration tests for ingestion pipeline using small recorded snapshots
-- Backtest regression tests to ensure metrics don't change unexpectedly
+### Testing Strategy & Quality Assurance
+
+For detailed testing strategy and implementation, see [TESTING.md](TESTING.md). Key testing areas:
+
+1. Unit Testing (per component)
+- Data Providers: Data fetching, validation, error handling
+- Feature Computation: Accuracy, boundary conditions
+- Feature Store: CRUD operations, data consistency
+- Scoring Engine: Weight calculations, normalization
+- API Layer: Endpoint functionality, error responses
+- Scheduler: Job execution, timing accuracy
+
+2. Integration Testing
+- End-to-end data flow from ingestion to scoring
+- API endpoints with live data
+- Job scheduler with full pipeline execution
+- Database and cache interactions
+
+3. Performance Testing
+- Load testing for batch operations
+- Concurrency testing for parallel processing
+- Resource usage under different loads
+- Response time metrics
+
+4. Quality Control Testing
+- Data quality validation
+- Feature computation accuracy
+- Score consistency and bounds
+- Model weight validation
+
+5. System Testing
+- Configuration management
+- Error recovery and fallbacks
+- Environment setup and tear down
+- Service communication
+
+6. Backtesting & Model Testing
+- Strategy performance metrics
+- Model training and validation
+- Weight optimization
+- Lookahead bias prevention
+
+7. Monitoring & Alert Testing
+- Alert trigger conditions
+- Performance metric tracking
+- Resource monitoring
+- Data freshness checks
 
 ### Explainability & Reporting
 - Store component contributions for each symbol-day for auditing
@@ -663,3 +706,239 @@ How this affects other components:
 ---
 
 File created/updated to implement the user's requested LLD for the factor-scoring agent.
+
+### Comprehensive End-to-End Testing & Validation
+
+To guarantee every feature and component works as intended, the following end-to-end testing and validation strategy must be implemented. This ensures not only unit correctness but also integration, system, and operational reliability across all scenarios, including edge cases and failure recovery.
+
+#### 1. Data Ingestion Layer
+- **Test all provider adapters** (OHLCV, Fundamentals, Corporate Actions, Options, Macro, Sentiment):
+  - Simulate successful and failed fetches (network errors, API limits, malformed data).
+  - Validate fallback logic and provider prioritization.
+  - Test data validation rules, gap detection, outlier handling, and freshness monitoring.
+  - Ensure ingestion pipeline stores data only if valid and logs all errors/fallbacks.
+  - Test ingestion with missing, duplicate, and out-of-order data.
+
+#### 2. ETL / Feature Engineering
+- **Test Data Preprocessor**:
+  - Corporate action adjustment correctness (splits, dividends, mergers).
+  - Time series alignment for multi-source data.
+  - Handling of missing, partial, or delayed data.
+- **Test Feature Computer**:
+  - Each feature category (Technical, Fundamental, Sentiment, Macro, Event, Options):
+    - Compute with valid, missing, and extreme input data.
+    - Validate output shape, NaN/infinity handling, and expected value ranges.
+    - Test feature enable/disable logic and category switching.
+  - Test feature computation for large universes and long time windows.
+
+#### 3. Feature Store
+- **Test storage and retrieval**:
+  - CRUD operations for all feature types, including metadata and quality tags.
+  - Querying by symbol, feature, time range, and interval.
+  - Test concurrent writes/reads and data consistency under load.
+  - Simulate DB failures and recovery (e.g., TimescaleDB restarts).
+  - Validate retention and archival logic.
+
+#### 4. Scoring Engine
+- **Test Normalizer**:
+  - Z-score, rank, and min-max normalization with various distributions.
+  - Outlier and clipping logic.
+- **Test Weight Manager**:
+  - Static and learned weights, sum-to-1 and constraint validation.
+  - Weight update, rollback, and versioning.
+- **Test Score Computer**:
+  - Aggregation logic, explanation output, and error propagation.
+  - Test with missing features, partial data, and category exclusion.
+
+#### 5. Learning & Backtest Module
+- **Test Dataset Builder**:
+  - Training set construction with rolling/expanding windows.
+  - Label generation for different horizons and return types.
+- **Test Model Manager**:
+  - Model training, hyperparameter tuning, and artifact serialization.
+  - Weight extraction and metrics computation.
+  - Model versioning, rollback, and drift detection.
+- **Test Backtest Engine**:
+  - Simulate trading with various strategies, transaction costs, and position sizing.
+  - Validate walk-forward, lookahead bias prevention, and performance metrics.
+  - Test with incomplete, noisy, and out-of-sample data.
+
+#### 6. API Layer
+- **Test all endpoints**:
+  - GET/POST for scores, features, runs, and explanations.
+  - Input validation, error responses, and edge cases (missing symbol, invalid date, etc).
+  - Test with large payloads, concurrent requests, and rate limiting.
+  - Security: test authentication, authorization, and input sanitization.
+
+#### 7. Storage & Ops
+- **Test database and cache**:
+  - Failover, backup/restore, and data integrity after recovery.
+  - Redis cache invalidation and real-time update propagation.
+- **Test message bus**:
+  - Kafka topic publishing/consuming, message loss, and ordering.
+  - Simulate network partitions and recovery.
+- **Test scheduler**:
+  - Airflow/Cron job execution, missed/duplicate runs, and manual triggers.
+  - Test job chaining, retries, and alerting on failure.
+
+#### 8. Monitoring, Alerting, and Observability
+- **Test all metrics and alerts**:
+  - Data quality, system health, business metrics, and custom thresholds.
+  - Simulate metric spikes, data delays, and error bursts.
+  - Validate alert delivery (email, Slack, etc) and escalation.
+
+#### 9. Security & Compliance
+- **Test secrets management**:
+  - Credential rotation, access control, and audit logging.
+- **Test data privacy**:
+  - Masking/sanitization of sensitive data in logs and exports.
+- **Test compliance with data licensing and regulatory requirements.
+
+#### 10. Edge Cases & Operational Resilience
+- **Test all edge scenarios**:
+  - Delisted symbols, new IPOs, corporate actions, and universe changes.
+  - Outlier detection, robust scaling, and fallback for missing fundamentals.
+  - Survivorship bias checks in backtests.
+
+#### 11. End-to-End System Tests
+- **Full pipeline runs**:
+  - Pre-market, intraday, and post-market flows with real and synthetic data.
+  - Simulate failures at each stage and verify recovery.
+  - Validate that all outputs (scores, features, models, reports) are correct and complete.
+
+#### 12. CI/CD & Automation
+- **Automate all tests in CI/CD**:
+  - Run all test suites (unit, integration, system, performance) on every commit.
+  - Enforce code coverage, linting, and static analysis.
+  - Deploy to staging and run smoke tests before production.
+
+#### 13. Documentation & Reporting
+- **Test documentation completeness**:
+  - Ensure all APIs, configs, and data contracts are documented and versioned.
+  - Generate daily/weekly reports with test results, coverage, and system health.
+
+---
+
+**Summary:**
+- Every function, feature, and integration point must have explicit tests for both success and failure scenarios.
+- All edge cases, error handling, and operational flows are covered.
+- The system is validated for correctness, reliability, and maintainability in real-world and adverse conditions.
+- See [TESTING.md](TESTING.md) for detailed test cases and code examples.
+
+### Scenario Coverage & End-to-End Implementation Checklist
+
+To ensure the system is robust, maintainable, and production-ready, the following scenarios and operational modes must be explicitly implemented and tested:
+
+#### Data Ingestion & Provider Fallback
+- Multi-provider fallback for all data types (OHLCV, fundamentals, options, macro, sentiment):
+  - Simulate primary provider outage, API quota exhaustion, and data corruption.
+  - Validate fallback to secondary/tertiary providers and log all transitions.
+  - Test provider-specific quirks (e.g., symbol mapping, timezone differences, data delays).
+- Dynamic provider configuration:
+  - Allow runtime addition/removal of providers and priority changes without downtime.
+- Data freshness and completeness:
+  - Monitor and alert if data is stale or incomplete for any symbol or feature.
+
+#### Universe Management
+- Dynamic universe changes:
+  - Add/remove symbols (e.g., IPOs, delistings, index rebalancing) and ensure all downstream components adapt.
+  - Test universe rebalancing logic and survivorship bias handling in backtests.
+- Ad-hoc and scheduled universe overrides:
+  - Support custom watchlists and on-demand runs for arbitrary symbol sets.
+
+#### Feature Engineering & Data Quality
+- Feature computation with missing, partial, or delayed data:
+  - Impute, skip, or flag low-confidence features.
+- Corporate actions:
+  - Adjust for splits, dividends, and mergers; test with real and synthetic events.
+- Outlier and anomaly detection:
+  - Detect and handle extreme values, data spikes, and sensor errors.
+- Feature versioning:
+  - Track changes in feature definitions and recalculate as needed.
+
+#### Scoring, Normalization, and Weighting
+- Multiple normalization strategies:
+  - Switch between z-score, rank, min-max, and custom transforms per factor.
+- Weighting strategies:
+  - Static, learned, and hybrid weights; test constraint enforcement and sum-to-1 normalization.
+- Score explainability:
+  - Store and serve per-factor contributions for every score.
+- Partial/incomplete feature sets:
+  - Compute scores with missing features and flag degraded results.
+
+#### Model Training, Drift, and Retraining
+- Model retraining triggers:
+  - Scheduled (e.g., weekly/monthly) and event-driven (e.g., drift detected, performance drop).
+- Data drift and model monitoring:
+  - Detect changes in feature distributions and alert on significant drift.
+- Model rollback and versioning:
+  - Roll back to previous model/weights on performance degradation.
+- Hyperparameter tuning:
+  - Support grid/random/optuna search and log all experiments.
+
+#### Backtesting & Evaluation
+- Walk-forward and rolling window backtests:
+  - Simulate realistic trading with lookahead prevention.
+- Multiple strategies:
+  - Test equal-weight, risk-parity, and custom strategies.
+- Transaction cost and slippage modeling:
+  - Parameterize and test with different cost assumptions.
+- Regime-aware evaluation:
+  - Segment performance by bull/bear/sideways markets.
+
+#### API, CLI, and User Flows
+- All REST endpoints:
+  - Test with valid, invalid, and edge-case inputs (e.g., future dates, unknown symbols).
+- CLI commands:
+  - Collect, serve, scheduler, and custom runs; test with all config permutations.
+- Pagination, filtering, and sorting in API responses.
+- Authentication and authorization:
+  - Role-based access, API key rotation, and audit logging.
+
+#### Scheduler, Jobs, and Recovery
+- Pre-market, intraday, and post-market job flows:
+  - Simulate missed, delayed, and duplicate jobs; ensure idempotency.
+- Manual and automated job triggers.
+- Job chaining, retries, and alerting on failure.
+- Graceful shutdown and restart with job resumption.
+
+#### Storage, Retention, and Archival
+- Data retention policies:
+  - Enforce raw, feature, and model retention/archival as per config.
+- Backup, restore, and disaster recovery:
+  - Test full and partial restores, point-in-time recovery, and failover.
+- Data migration and schema evolution:
+  - Handle schema changes without downtime or data loss.
+
+#### Monitoring, Alerting, and Observability
+- System health dashboards:
+  - Latency, throughput, error rates, and resource usage.
+- Data quality and freshness alerts.
+- Business metric monitoring (e.g., predictive power, hit rate).
+- Alert routing and escalation policies.
+
+#### Security, Compliance, and Privacy
+- Secrets management:
+  - Test rotation, revocation, and least-privilege access.
+- Data privacy:
+  - Masking, anonymization, and export controls.
+- Compliance with data licensing and regulatory requirements.
+
+#### Edge Cases & Operational Resilience
+- Delisted/merged symbols, ticker changes, and symbol reuse.
+- Corporate actions on ex-date and retroactive adjustments.
+- Network partitions, DB outages, and partial system failures.
+- High-latency and low-bandwidth scenarios.
+- Large-scale runs (e.g., all NSE500 symbols, 10+ years of history).
+
+#### Documentation, Reporting, and User Support
+- API and CLI documentation auto-generation and versioning.
+- Daily/weekly reports with system health, data quality, and top signals.
+- User feedback and support workflow for bug reports and feature requests.
+
+---
+
+**Implementation Note:**
+- Every scenario above must be covered by explicit code, configuration, and automated tests (see [TESTING.md](TESTING.md)).
+- All flows must be validated in both normal and failure modes, with clear logging, alerting, and recovery procedures.
+- The system must be maintainable, extensible, and ready for production deployment in both cloud and on-prem environments.

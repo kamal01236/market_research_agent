@@ -8,7 +8,7 @@ version = "0.1.0"
 authors = [{ name = "Market Research Team" }]
 description = "Factor-scoring quantitative agent for Indian equity markets"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pandas>=1.5.0",
     "numpy>=1.23.0",
@@ -55,7 +55,7 @@ line_length = 100
 multi_line_output = 3
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 ignore_missing_imports = true
 

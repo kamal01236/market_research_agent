@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+
 
 from ..base import Feature, FeatureComputer
 
@@ -66,28 +66,48 @@ class TechnicalFeatures(FeatureComputer):
         data: Dict[str, pd.DataFrame],
         window: Optional[int] = 14
     ) -> pd.DataFrame:
-        """Compute Relative Strength Index."""
+        """Compute Relative Strength Index (RSI) using pandas only."""
         df = data["prices"]
-        return ta.rsi(df["close"], length=window)
+        close = df["close"]
+        delta = close.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
 
     def _compute_macd(
         self,
         data: Dict[str, pd.DataFrame],
         window: Optional[int] = None
     ) -> pd.DataFrame:
-        """Compute MACD."""
+        """Compute MACD (Moving Average Convergence Divergence) using pandas only."""
         df = data["prices"]
-        macd = ta.macd(df["close"])
-        return macd["MACD_12_26_9"]
+        close = df["close"]
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        return macd - signal
 
     def _compute_atr(
         self,
         data: Dict[str, pd.DataFrame],
         window: Optional[int] = 14
     ) -> pd.DataFrame:
-        """Compute Average True Range."""
+        """Compute Average True Range (ATR) using pandas only."""
         df = data["prices"]
-        return ta.atr(df["high"], df["low"], df["close"], length=window)
+        high = df["high"]
+        low = df["low"]
+        close = df["close"]
+        prev_close = close.shift(1)
+        tr = pd.concat([
+            (high - low),
+            (high - prev_close).abs(),
+            (low - prev_close).abs()
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(window=window).mean()
+        return atr
 
     def _compute_beta(
         self,

@@ -1,0 +1,47 @@
+### Testing Strategy & Quality Assurance
+
+For detailed testing strategy and implementation, see [TESTING.md](TESTING.md). Key testing areas:
+
+1. Unit Testing (per component)
+- Data Providers: Data fetching, validation, error handling
+- Feature Computation: Accuracy, boundary conditions
+- Feature Store: CRUD operations, data consistency
+- Scoring Engine: Weight calculations, normalization
+- API Layer: Endpoint functionality, error responses
+- Scheduler: Job execution, timing accuracy
+
+2. Integration Testing
+- End-to-end data flow from ingestion to scoring
+- API endpoints with live data
+- Job scheduler with full pipeline execution
+- Database and cache interactions
+
+3. Performance Testing
+- Load testing for batch operations
+- Concurrency testing for parallel processing
+- Resource usage under different loads
+- Response time metrics
+
+4. Quality Control Testing
+- Data quality validation
+- Feature computation accuracy
+- Score consistency and bounds
+- Model weight validation
+
+5. System Testing
+- Configuration management
+- Error recovery and fallbacks
+- Environment setup and tear down
+- Service communication
+
+6. Backtesting & Model Testing
+- Strategy performance metrics
+- Model training and validation
+- Weight optimization
+- Lookahead bias prevention
+
+7. Monitoring & Alert Testing
+- Alert trigger conditions
+- Performance metric tracking
+- Resource monitoring
+- Data freshness checks

@@ -30,3 +30,34 @@ def components(normalized: Dict[str, float], weights: Dict[str, float]) -> Dict[
     for k, v in normalized.items():
         out[k] = {"norm": float(v), "weight": float(weights.get(k, 0.0)), "contribution": float(v * weights.get(k, 0.0))}
     return out
+
+
+class FactorScorer:
+    """Factor scoring engine for async API usage."""
+    def __init__(self):
+        pass
+
+    async def compute_scores(self, features, factors=None, weights=None):
+        # features: pd.DataFrame or dict-like
+        # factors: list of factor names to use
+        # weights: dict of factor->weight
+        import pandas as pd
+        if isinstance(features, dict):
+            features = pd.DataFrame(features)
+        if factors is None:
+            factors = list(features.columns)
+        if weights is None:
+            weights = {f: 1.0 / len(factors) for f in factors}
+        # Use last row if DataFrame
+        row = features[factors].iloc[-1].to_dict()
+        norm = normalize_zscore(row)
+        score = aggregate_score(norm, weights)
+        expl = components(norm, weights)
+        import pandas as pd
+        return pd.Series({"score": score, **{f: expl[f]["contribution"] for f in factors}})
+
+    async def get_available_factors(self):
+        # In a real system, this would query config or DB
+        return [
+            "sma_20", "sma_50", "sma_200", "ema_20", "rsi_14", "macd", "atr", "beta", "volume_ratio"
+        ]
