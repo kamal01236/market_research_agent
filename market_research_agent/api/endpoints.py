@@ -33,7 +33,9 @@ async def get_provider():
 
 async def get_feature_store():
     """Get feature store instance."""
-    return FeatureStore()
+    # Use SQLite for dev/test; in prod, use env/config
+    db_url = "sqlite:///market_features.db"
+    return FeatureStore(db_url)
 
 async def get_scorer():
     """Get factor scorer instance."""
@@ -85,10 +87,37 @@ async def compute_features(
         # Compute features
         results = {}
         for sym, df in data.items():
-            features = await feature_computer.compute(df)
-            await feature_store.store_features(sym, features)
-            results[sym] = features.to_dict(orient="index")
-        
+            # Build feature list for all available features with correct window values
+            from market_research_agent.base import Feature
+            def get_window(name):
+                # Try to extract window from feature name (e.g., sma_20 -> 20)
+                parts = name.split("_")
+                if len(parts) > 1 and parts[-1].isdigit():
+                    return int(parts[-1])
+                if name.startswith("atr"):
+                    return 14
+                if name.startswith("macd"):
+                    return None
+                if name.startswith("beta"):
+                    return 252
+                if name.startswith("volume_ratio"):
+                    return 20
+                return 20
+            feature_list = [
+                Feature(
+                    name=name,
+                    category="technical",
+                    description=f"{name} factor",
+                    value_type="float",
+                    frequency="1d",
+                    window=get_window(name)
+                )
+                for name in feature_computer.feature_map.keys()
+            ]
+            features = feature_computer.compute_features(df, feature_list)
+            await feature_store.store_features(features, symbol=sym)
+            # For response, just show the computed features as dict
+            results[sym] = {k: v.to_dict() for k, v in features.items()}
         return results
         
     except Exception as e:
@@ -105,28 +134,57 @@ async def compute_scores(
 ) -> Dict[str, dict]:
     """Compute factor scores for given symbols."""
     try:
+        import logging
         results = {}
         for sym in request.symbols:
-            # Get features from store
-            features = await feature_store.get_features(
-                sym,
-                request.start_date,
-                request.end_date
+            features_result = await feature_store.get_features(
+                [sym], request.factors, request.start_date, request.end_date
             )
-            
-            if features is None or features.empty:
+            # Handle both dict-of-DataFrames and DataFrame return types
+            features_df = None
+            if isinstance(features_result, dict):
+                features_df = features_result.get(sym)
+            else:
+                features_df = features_result
+            logging.warning(f"[compute-scores] features_df for {sym}:\n{features_df}")
+            if features_df is None or features_df.empty:
+                logging.warning(f"[compute-scores] features_df is empty for {sym}")
                 continue
-                
-            # Compute scores
-            scores = await scorer.compute_scores(
-                features,
-                request.factors,
-                request.weights
-            )
-            results[sym] = scores.to_dict(orient="index")
-            
+            try:
+                # If columns are multi-indexed, extract symbol level
+                if hasattr(features_df.columns, 'nlevels') and features_df.columns.nlevels > 1:
+                    sym_df = features_df.xs(sym, axis=1, level=0)
+                else:
+                    sym_df = features_df
+            except Exception as e:
+                logging.warning(f"[compute-scores] Error extracting sym_df for {sym}: {e}")
+                continue
+            logging.warning(f"[compute-scores] sym_df for {sym}:\n{sym_df}")
+            valid_rows = sym_df.dropna(subset=request.factors, how="any")
+            logging.warning(f"[compute-scores] valid_rows for {sym}:\n{valid_rows}")
+            if valid_rows.empty:
+                logging.warning(f"[compute-scores] No valid rows for {sym}")
+                continue
+            last_row = valid_rows.iloc[-1]
+            raw_values = last_row.to_dict()
+            norm = scorer.normalize_zscore(raw_values)
+            weights = request.weights or {f: 1.0 / len(request.factors) for f in request.factors}
+            score = scorer.aggregate_score(norm, weights)
+            comps = scorer.components(norm, weights)
+            factors_out = {}
+            for f in request.factors:
+                factors_out[f] = {
+                    "value": raw_values.get(f),
+                    "normalized": norm.get(f),
+                    "weight": weights.get(f, 0.0),
+                    "contribution": comps.get(f, {}).get("contribution")
+                }
+            results[sym] = {
+                "score": score,
+                "factors": factors_out
+            }
+        logging.warning(f"[compute-scores] Final results: {results}")
         return results
-        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -136,10 +194,16 @@ async def compute_scores(
 @router.get("/available-factors")
 async def get_available_factors(
     scorer: FactorScorer = Depends(get_scorer)
-) -> List[str]:
-    """Get list of available factors."""
+) -> List[dict]:
+    """Get list of available factors with metadata."""
     try:
-        return await scorer.get_available_factors()
+        # Example metadata; in real system, fetch from config or DB
+        factors = await scorer.get_available_factors()
+        meta = [
+            {"name": f, "description": f"{f} factor", "window": 20 if "sma" in f or "ema" in f or "zscore" in f else 14, "value_type": "float"}
+            for f in factors
+        ]
+        return meta
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

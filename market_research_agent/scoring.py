@@ -37,6 +37,15 @@ class FactorScorer:
     def __init__(self):
         pass
 
+    def normalize_zscore(self, values: Dict[str, float]) -> Dict[str, float]:
+        return normalize_zscore(values)
+
+    def aggregate_score(self, normalized: Dict[str, float], weights: Dict[str, float]) -> float:
+        return aggregate_score(normalized, weights)
+
+    def components(self, normalized: Dict[str, float], weights: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+        return components(normalized, weights)
+
     async def compute_scores(self, features, factors=None, weights=None):
         # features: pd.DataFrame or dict-like
         # factors: list of factor names to use
@@ -50,10 +59,9 @@ class FactorScorer:
             weights = {f: 1.0 / len(factors) for f in factors}
         # Use last row if DataFrame
         row = features[factors].iloc[-1].to_dict()
-        norm = normalize_zscore(row)
-        score = aggregate_score(norm, weights)
-        expl = components(norm, weights)
-        import pandas as pd
+        norm = self.normalize_zscore(row)
+        score = self.aggregate_score(norm, weights)
+        expl = self.components(norm, weights)
         return pd.Series({"score": score, **{f: expl[f]["contribution"] for f in factors}})
 
     async def get_available_factors(self):

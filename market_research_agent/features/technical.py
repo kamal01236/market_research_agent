@@ -26,7 +26,7 @@ class TechnicalFeatures(FeatureComputer):
 
     def compute_features(
         self,
-        data: Dict[str, pd.DataFrame],
+        data: pd.DataFrame,
         features: List[Feature]
     ) -> Dict[str, pd.DataFrame]:
         """Compute technical features from OHLCV data."""
@@ -36,38 +36,42 @@ class TechnicalFeatures(FeatureComputer):
                 compute_fn = self.feature_map[feature.name]
                 try:
                     result = compute_fn(data, feature.window)
-                    results[feature.name] = result
+                    # Always wrap as DataFrame for storage compatibility
+                    if isinstance(result, pd.Series):
+                        df_feat = result.to_frame(name=feature.name)
+                    else:
+                        df_feat = result
+                    df_feat.index.name = "ts"
+                    # Ensure unique index (no duplicate timestamps)
+                    df_feat = df_feat[~df_feat.index.duplicated(keep="last")]
+                    results[feature.name] = df_feat
                 except Exception as e:
-                    # Log error and continue
                     print(f"Error computing {feature.name}: {str(e)}")
                     continue
         return results
 
     def _compute_sma(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int]
     ) -> pd.DataFrame:
         """Compute Simple Moving Average."""
-        df = data["prices"]  # Assuming OHLCV DataFrame
         return df["close"].rolling(window=window).mean()
 
     def _compute_ema(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int]
     ) -> pd.DataFrame:
         """Compute Exponential Moving Average."""
-        df = data["prices"]
         return df["close"].ewm(span=window, adjust=False).mean()
 
     def _compute_rsi(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int] = 14
     ) -> pd.DataFrame:
         """Compute Relative Strength Index (RSI) using pandas only."""
-        df = data["prices"]
         close = df["close"]
         delta = close.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -78,11 +82,10 @@ class TechnicalFeatures(FeatureComputer):
 
     def _compute_macd(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int] = None
     ) -> pd.DataFrame:
         """Compute MACD (Moving Average Convergence Divergence) using pandas only."""
-        df = data["prices"]
         close = df["close"]
         ema12 = close.ewm(span=12, adjust=False).mean()
         ema26 = close.ewm(span=26, adjust=False).mean()
@@ -92,11 +95,10 @@ class TechnicalFeatures(FeatureComputer):
 
     def _compute_atr(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int] = 14
     ) -> pd.DataFrame:
         """Compute Average True Range (ATR) using pandas only."""
-        df = data["prices"]
         high = df["high"]
         low = df["low"]
         close = df["close"]
@@ -111,25 +113,19 @@ class TechnicalFeatures(FeatureComputer):
 
     def _compute_beta(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int] = 252
     ) -> pd.DataFrame:
-        """Compute beta against market index."""
-        stock_returns = data["prices"]["close"].pct_change()
-        market_returns = data["market"]["close"].pct_change()
-        
-        # Rolling beta calculation
-        cov = stock_returns.rolling(window=window).cov(market_returns)
-        market_var = market_returns.rolling(window=window).var()
-        return cov / market_var
+        """Compute beta against market index (requires market data, not implemented here)."""
+        # Placeholder: return NaN series
+        return pd.Series([np.nan] * len(df), index=df.index)
 
     def _compute_volume_ratio(
         self,
-        data: Dict[str, pd.DataFrame],
+        df: pd.DataFrame,
         window: Optional[int] = 20
     ) -> pd.DataFrame:
         """Compute volume ratio vs moving average."""
-        df = data["prices"]
         avg_volume = df["volume"].rolling(window=window).mean()
         return df["volume"] / avg_volume
 

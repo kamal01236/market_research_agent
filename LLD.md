@@ -511,6 +511,83 @@ REST API endpoints (FastAPI example):
 
 Payload formats are JSON; components use compact JSON for factor breakdown.
 
+---
+
+### API Endpoints: Factor Score Transparency & Full Factor Breakdown
+
+#### 1. `/score` (POST)
+- **Purpose:** Compute and return the aggregate score for each stock, along with a full breakdown of all factor values, normalizations, weights, and contributions used in the scoring process.
+- **Request:**
+  - `symbols`: List[str] — Stock symbols to score
+  - `factors`: Optional[List[str]] — Factors to use (default: all available)
+  - `weights`: Optional[Dict[str, float]] — Factor weights (default: equal)
+  - `date`: Optional[str] — Date for which to compute (default: latest)
+- **Response:**
+  - For each symbol:
+    - `score`: float — Final aggregate score
+    - `factors`: Dict[str, Dict] — For each factor:
+      - `value`: float — Raw value used for scoring
+      - `normalized`: float — Z-score normalized value
+      - `weight`: float — Weight applied
+      - `contribution`: float — Weighted contribution to the score
+
+**Example Response:**
+```json
+{
+  "RELIANCE": {
+    "score": 0.42,
+    "factors": {
+      "sma_20": {"value": 123.4, "normalized": 0.12, "weight": 0.2, "contribution": 0.024},
+      "rsi_14": {"value": 55.1, "normalized": -0.08, "weight": 0.2, "contribution": -0.016}
+      // ...other factors
+    }
+  },
+  "TCS": {
+    "score": -0.11,
+    "factors": {
+      // ...factor details
+    }
+  }
+}
+```
+
+**Implementation Details:**
+- The API handler should:
+  1. Fetch the latest feature values for each symbol and factor.
+  2. Normalize values using `normalize_zscore` (from `scoring.py`).
+  3. Compute the aggregate score and per-factor contributions using `aggregate_score` and `components`.
+  4. Return all raw values, normalized values, weights, and contributions in the response.
+- If a factor value is missing for a symbol, return `null` or indicate missing data.
+- If weights are not provided, use equal weighting.
+- If no factors are specified, use all available factors.
+- For large universes or many factors, consider pagination or limiting factors in production.
+
+#### 2. `/factors` (GET)
+- **Purpose:** List all available factors and their metadata (description, window, etc.).
+- **Response:**
+  - `factors`: List[Dict] — Each with `name`, `description`, `window`, `value_type`, etc.
+
+---
+
+### Analysis of Current Suggestion
+
+**Strengths:**
+- Provides full transparency and explainability: users see not just the score, but exactly how each factor contributed.
+- Supports auditability and regulatory requirements.
+- Design is extensible: new factors or changes in weighting logic are automatically reflected in the API output.
+
+**Potential Gaps:**
+- The API and feature store must ensure all requested factors are available for each symbol and date.
+- For very large universes or many factors, response size could be large; consider pagination or limiting factors in production.
+- If a factor is missing for a symbol, the API should clearly indicate this (e.g., `null` value or error field).
+
+**Actionable Next Steps:**
+- Update the API endpoint implementation to return the full factor breakdown as shown above.
+- Add tests to ensure the API returns all expected fields and handles missing data gracefully.
+- Document the endpoint and response structure for users.
+
+---
+
 ### Storage & Retention
 - Raw ticks/1m pricedata: retain 6-12 months in DB, archive older to object store
 - Daily OHLCV & computed features: retain indefinitely in TimescaleDB
